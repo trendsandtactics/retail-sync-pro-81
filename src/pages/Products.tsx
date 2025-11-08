@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import { useTenant, useCurrentStore } from "@/hooks/useTenant";
+import { useTenantStore } from "@/hooks/useTenantStore";
 
 interface Product {
   id: string;
@@ -30,8 +30,7 @@ const Products = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const { toast } = useToast();
-  const { data: tenantData } = useTenant();
-  const { getCurrentStoreId } = useCurrentStore();
+  const { currentStore, tenantId } = useTenantStore();
 
   useEffect(() => {
     loadProducts();
@@ -64,10 +63,7 @@ const Products = () => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !tenantData) return;
-
-    const currentStoreId = getCurrentStoreId();
-    if (!currentStoreId) {
+    if (!user || !tenantId || !currentStore) {
       toast({
         title: "Error",
         description: "Please select a store first",
@@ -78,8 +74,8 @@ const Products = () => {
 
     const productData = {
       user_id: user.id,
-      tenant_id: tenantData.tenant_id,
-      store_id: currentStoreId,
+      tenant_id: tenantId,
+      store_id: currentStore.id,
       sku: formData.get("sku") as string,
       name: formData.get("name") as string,
       barcode: formData.get("barcode") as string || null,

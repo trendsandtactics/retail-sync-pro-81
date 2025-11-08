@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Search, Plus, Trash2, ShoppingCart, Printer } from "lucide-react";
-import { useTenant, useCurrentStore } from "@/hooks/useTenant";
+import { useTenantStore } from "@/hooks/useTenantStore";
 
 interface Product {
   id: string;
@@ -38,8 +38,7 @@ const POS = () => {
   const [receiptDialog, setReceiptDialog] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
   const { toast } = useToast();
-  const { data: tenantData } = useTenant();
-  const { getCurrentStoreId } = useCurrentStore();
+  const { currentStore, tenantId } = useTenantStore();
 
   useEffect(() => {
     loadProducts();
@@ -153,10 +152,7 @@ const POS = () => {
     }
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !tenantData) return;
-
-    const currentStoreId = getCurrentStoreId();
-    if (!currentStoreId) {
+    if (!user || !tenantId || !currentStore) {
       toast({
         title: "Error",
         description: "Please select a store first",
@@ -174,8 +170,8 @@ const POS = () => {
       .insert([
         {
           user_id: user.id,
-          tenant_id: tenantData.tenant_id,
-          store_id: currentStoreId,
+          tenant_id: tenantId,
+          store_id: currentStore.id,
           invoice_number: invoiceNumber,
           customer_name: customerName || null,
           customer_phone: customerPhone || null,

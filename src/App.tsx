@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
+import { TenantStoreProvider } from "@/hooks/useTenantStore";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import POS from "./pages/POS";
@@ -47,55 +48,57 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/auth" element={user ? <Navigate to="/dashboard" /> : <Auth />} />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Dashboard />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/pos"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <POS />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/products"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Products />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/sales"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Sales />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/" element={<Navigate to={user ? "/dashboard" : "/auth"} />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
+        <TenantStoreProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/auth" element={user ? <Navigate to="/dashboard" /> : <Auth />} />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <DashboardLayout>
+                      <Dashboard />
+                    </DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pos"
+                element={
+                  <ProtectedRoute>
+                    <DashboardLayout>
+                      <POS />
+                    </DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/products"
+                element={
+                  <ProtectedRoute>
+                    <DashboardLayout>
+                      <Products />
+                    </DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/sales"
+                element={
+                  <ProtectedRoute>
+                    <DashboardLayout>
+                      <Sales />
+                    </DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/" element={<Navigate to={user ? "/dashboard" : "/auth"} />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TenantStoreProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
