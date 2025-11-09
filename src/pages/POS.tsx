@@ -31,6 +31,14 @@ interface CartItem extends Product {
   expiry_date?: string;
 }
 
+interface Batch {
+  id: string;
+  batch_number: string;
+  expiry_date: string;
+  remaining_quantity: number;
+  manufacturing_date: string;
+}
+
 const POS = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -40,6 +48,9 @@ const POS = () => {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [receiptDialog, setReceiptDialog] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [batchDialog, setBatchDialog] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
 
@@ -63,14 +74,46 @@ const POS = () => {
     }
   };
 
-  const addToCart = (product: Product) => {
-    const existing = cart.find((item) => item.id === product.id);
+  const loadBatches = async (productId: string) => {
+    const { data, error } = await supabase
+      .from("product_batches")
+      .select("*")
+      .eq("product_id", productId)
+      .eq("is_active", true)
+      .gt("remaining_quantity", 0)
+      .order("expiry_date", { ascending: true });
+
+    if (!error && data) {
+      setAvailableBatches(data);
+    }
+  };
+
+  const addToCart = async (product: Product) => {
+    setSelectedProduct(product);
+    await loadBatches(product.id);
+    setBatchDialog(true);
+  };
+
+  const addBatchToCart = (batch: Batch) => {
+    if (!selectedProduct) return;
+
+    const isExpired = new Date(batch.expiry_date) < new Date();
+    if (isExpired) {
+      toast({
+        title: "Cannot add expired batch",
+        description: "This batch has expired and cannot be sold",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const existing = cart.find((item) => item.id === selectedProduct.id && item.batch_id === batch.id);
     
     if (existing) {
-      if (existing.quantity >= product.stock_quantity) {
+      if (existing.quantity >= batch.remaining_quantity) {
         toast({
           title: "Insufficient stock",
-          description: `Only ${product.stock_quantity} units available`,
+          description: `Only ${batch.remaining_quantity} units available in this batch`,
           variant: "destructive",
         });
         return;
@@ -78,7 +121,7 @@ const POS = () => {
       
       setCart(
         cart.map((item) =>
-          item.id === product.id
+          item.id === selectedProduct.id && item.batch_id === batch.id
             ? {
                 ...item,
                 quantity: item.quantity + 1,
@@ -92,40 +135,53 @@ const POS = () => {
       setCart([
         ...cart,
         {
-          ...product,
+          ...selectedProduct,
           quantity: 1,
-          itemTotal: product.selling_price,
-          itemTax: (product.selling_price * product.tax_rate) / 100,
+          itemTotal: selectedProduct.selling_price,
+          itemTax: (selectedProduct.selling_price * selectedProduct.tax_rate) / 100,
+          batch_id: batch.id,
+          batch_number: batch.batch_number,
+          expiry_date: batch.expiry_date,
         },
       ]);
     }
+
+    setBatchDialog(false);
+    setSelectedProduct(null);
+    toast({
+      title: "Added to cart",
+      description: `${selectedProduct.name} - Batch ${batch.batch_number}`,
+    });
   };
 
   const removeFromCart = (productId: string, batchId?: string) => {
     setCart(cart.filter((item) => !(item.id === productId && (!batchId || item.batch_id === batchId))));
   };
 
-  const updateQuantity = (productId: string, quantity: number) => {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
+  const updateQuantity = (productId: string, quantity: number, batchId?: string) => {
+    const cartItem = cart.find((item) => item.id === productId && (!batchId || item.batch_id === batchId));
+    if (!cartItem) return;
 
-    if (quantity > product.stock_quantity) {
+    const batch = availableBatches.find((b) => b.id === cartItem.batch_id);
+    const maxQuantity = batch?.remaining_quantity || cartItem.stock_quantity;
+
+    if (quantity > maxQuantity) {
       toast({
         title: "Insufficient stock",
-        description: `Only ${product.stock_quantity} units available`,
+        description: `Only ${maxQuantity} units available`,
         variant: "destructive",
       });
       return;
     }
 
     if (quantity <= 0) {
-      removeFromCart(productId);
+      removeFromCart(productId, batchId);
       return;
     }
 
     setCart(
       cart.map((item) =>
-        item.id === productId
+        item.id === productId && (!batchId || item.batch_id === batchId)
           ? {
               ...item,
               quantity,
@@ -209,6 +265,7 @@ const POS = () => {
       tax_rate: item.tax_rate,
       tax_amount: item.itemTax,
       total_amount: item.itemTotal + item.itemTax,
+      batch_id: item.batch_id,
     }));
 
     const { error: itemsError } = await supabase
@@ -224,8 +281,29 @@ const POS = () => {
       return;
     }
 
-    // Update product stock
+    // Update batch quantities and product stock
     for (const item of cart) {
+      if (item.batch_id) {
+        // Get current batch quantity
+        const { data: batchData } = await supabase
+          .from("product_batches")
+          .select("remaining_quantity")
+          .eq("id", item.batch_id)
+          .single();
+
+        if (batchData) {
+          const { error: batchError } = await supabase
+            .from("product_batches")
+            .update({ remaining_quantity: batchData.remaining_quantity - item.quantity })
+            .eq("id", item.batch_id);
+
+          if (batchError) {
+            console.error("Error updating batch:", batchError);
+          }
+        }
+      }
+
+      // Update total product stock
       const { error: stockError } = await supabase
         .from("products")
         .update({ stock_quantity: item.stock_quantity - item.quantity })
@@ -325,6 +403,9 @@ const POS = () => {
                       <div className="flex-1">
                         <h4 className="font-semibold">{item.name}</h4>
                         <p className="text-sm text-muted-foreground">₹{item.selling_price} × {item.quantity}</p>
+                        {item.batch_number && (
+                          <p className="text-xs text-muted-foreground">Batch: {item.batch_number}</p>
+                        )}
                       </div>
                       <Button
                         variant="ghost"
@@ -338,9 +419,8 @@ const POS = () => {
                       <Input
                         type="number"
                         min="1"
-                        max={item.stock_quantity}
                         value={item.quantity}
-                        onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
+                        onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0, item.batch_id)}
                         className="w-20"
                       />
                       <span className="text-sm font-semibold ml-auto">
@@ -412,6 +492,82 @@ const POS = () => {
           </Button>
         </div>
       </div>
+
+      {/* Batch Selection Dialog */}
+      <Dialog open={batchDialog} onOpenChange={setBatchDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Select Batch - {selectedProduct?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {availableBatches.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No batches available for this product</p>
+              </div>
+            ) : (
+              availableBatches.map((batch) => {
+                const isExpired = new Date(batch.expiry_date) < new Date();
+                const isExpiringSoon = !isExpired && new Date(batch.expiry_date) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                
+                return (
+                  <Card
+                    key={batch.id}
+                    className={`cursor-pointer transition-all hover:shadow-md ${
+                      isExpired ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                    onClick={() => !isExpired && addBatchToCart(batch)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-semibold">Batch: {batch.batch_number}</h4>
+                            {isExpired && (
+                              <span className="text-xs px-2 py-1 rounded bg-destructive/20 text-destructive">
+                                Expired
+                              </span>
+                            )}
+                            {isExpiringSoon && (
+                              <span className="text-xs px-2 py-1 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-500">
+                                Expiring Soon
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-muted-foreground">
+                            <div>
+                              <span className="font-medium">Expiry:</span>{" "}
+                              {new Date(batch.expiry_date).toLocaleDateString()}
+                            </div>
+                            <div>
+                              <span className="font-medium">Stock:</span> {batch.remaining_quantity}
+                            </div>
+                            <div>
+                              <span className="font-medium">Mfg Date:</span>{" "}
+                              {new Date(batch.manufacturing_date).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          variant={isExpired ? "outline" : "default"}
+                          size="sm"
+                          disabled={isExpired}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addBatchToCart(batch);
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Receipt Dialog */}
       <Dialog open={receiptDialog} onOpenChange={setReceiptDialog}>
