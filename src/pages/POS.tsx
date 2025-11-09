@@ -26,6 +26,9 @@ interface CartItem extends Product {
   quantity: number;
   itemTotal: number;
   itemTax: number;
+  batch_id?: string;
+  batch_number?: string;
+  expiry_date?: string;
 }
 
 const POS = () => {
