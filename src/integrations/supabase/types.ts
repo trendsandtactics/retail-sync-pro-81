@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      product_batches: {
+        Row: {
+          batch_number: string
+          created_at: string | null
+          expiry_date: string
+          id: string
+          is_active: boolean | null
+          manufacturing_date: string | null
+          product_id: string
+          purchase_price: number
+          quantity: number
+          remaining_quantity: number
+          store_id: string
+          tenant_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          batch_number: string
+          created_at?: string | null
+          expiry_date: string
+          id?: string
+          is_active?: boolean | null
+          manufacturing_date?: string | null
+          product_id: string
+          purchase_price?: number
+          quantity?: number
+          remaining_quantity?: number
+          store_id: string
+          tenant_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          batch_number?: string
+          created_at?: string | null
+          expiry_date?: string
+          id?: string
+          is_active?: boolean | null
+          manufacturing_date?: string | null
+          product_id?: string
+          purchase_price?: number
+          quantity?: number
+          remaining_quantity?: number
+          store_id?: string
+          tenant_id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           barcode: string | null
@@ -129,6 +177,7 @@ export type Database = {
       }
       sale_items: {
         Row: {
+          batch_id: string | null
           created_at: string | null
           discount_amount: number | null
           hsn_code: string | null
@@ -144,6 +193,7 @@ export type Database = {
           unit_price: number
         }
         Insert: {
+          batch_id?: string | null
           created_at?: string | null
           discount_amount?: number | null
           hsn_code?: string | null
@@ -159,6 +209,7 @@ export type Database = {
           unit_price: number
         }
         Update: {
+          batch_id?: string | null
           created_at?: string | null
           discount_amount?: number | null
           hsn_code?: string | null

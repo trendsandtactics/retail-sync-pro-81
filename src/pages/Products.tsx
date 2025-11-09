@@ -8,8 +8,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, AlertTriangle } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
+import { BatchesDialog } from "@/components/BatchesDialog";
+import { addDays, isBefore } from "date-fns";
 
 interface Product {
   id: string;
@@ -29,12 +31,41 @@ const Products = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [batchesDialogOpen, setBatchesDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [expiryAlerts, setExpiryAlerts] = useState<Record<string, number>>({});
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
 
   useEffect(() => {
     loadProducts();
+    loadExpiryAlerts();
   }, []);
+
+  const loadExpiryAlerts = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const today = new Date();
+    const warningDate = addDays(today, 30);
+
+    const { data } = await supabase
+      .from("product_batches")
+      .select("product_id, expiry_date")
+      .eq("is_active", true)
+      .lte("expiry_date", warningDate.toISOString());
+
+    if (data) {
+      const alerts: Record<string, number> = {};
+      data.forEach((batch) => {
+        const expiry = new Date(batch.expiry_date);
+        if (isBefore(expiry, today)) {
+          alerts[batch.product_id] = (alerts[batch.product_id] || 0) + 1;
+        }
+      });
+      setExpiryAlerts(alerts);
+    }
+  };
 
   const loadProducts = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -289,6 +320,7 @@ const Products = () => {
                 <TableHead>Price</TableHead>
                 <TableHead>Tax</TableHead>
                 <TableHead>Stock</TableHead>
+                <TableHead>Batches</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -307,6 +339,25 @@ const Products = () => {
                     >
                       {product.stock_quantity}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedProduct(product);
+                        setBatchesDialogOpen(true);
+                      }}
+                    >
+                      <Package className="mr-2 h-4 w-4" />
+                      Manage
+                      {expiryAlerts[product.id] && (
+                        <Badge variant="destructive" className="ml-2">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          {expiryAlerts[product.id]}
+                        </Badge>
+                      )}
+                    </Button>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-2">
@@ -333,7 +384,7 @@ const Products = () => {
               ))}
               {products.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     No products found. Add your first product to get started.
                   </TableCell>
                 </TableRow>
@@ -342,6 +393,15 @@ const Products = () => {
           </Table>
         </CardContent>
       </Card>
+
+      {selectedProduct && (
+        <BatchesDialog
+          open={batchesDialogOpen}
+          onOpenChange={setBatchesDialogOpen}
+          productId={selectedProduct.id}
+          productName={selectedProduct.name}
+        />
+      )}
     </div>
   );
 };

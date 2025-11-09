@@ -98,8 +98,8 @@ const POS = () => {
     }
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart(cart.filter((item) => item.id !== productId));
+  const removeFromCart = (productId: string, batchId?: string) => {
+    setCart(cart.filter((item) => !(item.id === productId && (!batchId || item.batch_id === batchId))));
   };
 
   const updateQuantity = (productId: string, quantity: number) => {
