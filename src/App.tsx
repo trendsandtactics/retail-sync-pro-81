@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import POS from "./pages/POS";
 import Products from "./pages/Products";
 import Sales from "./pages/Sales";
+import Reports from "./pages/Reports";
 import DashboardLayout from "./components/DashboardLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
@@ -90,6 +91,16 @@ const App = () => {
                   <ProtectedRoute>
                     <DashboardLayout>
                       <Sales />
+                    </DashboardLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <ProtectedRoute>
+                    <DashboardLayout>
+                      <Reports />
                     </DashboardLayout>
                   </ProtectedRoute>
                 }

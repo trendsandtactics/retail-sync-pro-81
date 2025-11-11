@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Store, ShoppingCart, Package, BarChart3, LogOut, Building2 } from "lucide-react";
+import { Store, ShoppingCart, Package, BarChart3, LogOut, Building2, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useTenantStore } from "@/hooks/useTenantStore";
 import {
@@ -40,6 +40,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     { path: "/pos", icon: ShoppingCart, label: "POS" },
     { path: "/products", icon: Package, label: "Products" },
     { path: "/sales", icon: BarChart3, label: "Sales" },
+    { path: "/reports", icon: FileText, label: "Reports" },
   ];
 
   return (
