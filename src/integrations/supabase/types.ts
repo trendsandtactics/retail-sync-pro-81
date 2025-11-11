@@ -69,6 +69,7 @@ export type Database = {
           hsn_code: string | null
           id: string
           is_active: boolean | null
+          min_batch_stock_level: number | null
           min_stock_level: number | null
           mrp: number | null
           name: string
@@ -89,6 +90,7 @@ export type Database = {
           hsn_code?: string | null
           id?: string
           is_active?: boolean | null
+          min_batch_stock_level?: number | null
           min_stock_level?: number | null
           mrp?: number | null
           name: string
@@ -109,6 +111,7 @@ export type Database = {
           hsn_code?: string | null
           id?: string
           is_active?: boolean | null
+          min_batch_stock_level?: number | null
           min_stock_level?: number | null
           mrp?: number | null
           name?: string

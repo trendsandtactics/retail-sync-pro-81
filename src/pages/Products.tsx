@@ -24,6 +24,7 @@ interface Product {
   tax_rate: number;
   stock_quantity: number;
   min_stock_level: number;
+  min_batch_stock_level: number | null;
 }
 
 const Products = () => {
@@ -295,6 +296,17 @@ const Products = () => {
                     required
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="min_batch_stock_level">Min Batch Stock Level</Label>
+                <Input
+                  id="min_batch_stock_level"
+                  name="min_batch_stock_level"
+                  type="number"
+                  defaultValue={editingProduct?.min_batch_stock_level || 5}
+                  placeholder="Alert when batch stock falls below this level"
+                />
               </div>
 
               <Button type="submit" className="w-full">

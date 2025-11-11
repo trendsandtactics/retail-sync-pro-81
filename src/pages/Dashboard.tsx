@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IndianRupee, ShoppingCart, Package, TrendingUp } from "lucide-react";
+import { LowStockBatchAlert } from "@/components/LowStockBatchAlert";
 
 interface Stats {
   totalSales: number;
@@ -130,6 +131,10 @@ const Dashboard = () => {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="mt-6">
+        <LowStockBatchAlert />
       </div>
     </div>
   );
