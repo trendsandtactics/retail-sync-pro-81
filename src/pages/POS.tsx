@@ -48,9 +48,6 @@ const POS = () => {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [receiptDialog, setReceiptDialog] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
-  const [batchDialog, setBatchDialog] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
 
@@ -74,7 +71,7 @@ const POS = () => {
     }
   };
 
-  const loadBatches = async (productId: string) => {
+  const loadBatches = async (productId: string): Promise<Batch[]> => {
     const { data, error } = await supabase
       .from("product_batches")
       .select("*")
@@ -84,44 +81,57 @@ const POS = () => {
       .order("expiry_date", { ascending: true });
 
     if (!error && data) {
-      setAvailableBatches(data);
+      return data;
     }
+    return [];
   };
 
   const addToCart = async (product: Product) => {
-    setSelectedProduct(product);
-    await loadBatches(product.id);
-    setBatchDialog(true);
-  };
-
-  const addBatchToCart = (batch: Batch) => {
-    if (!selectedProduct) return;
-
-    const isExpired = new Date(batch.expiry_date) < new Date();
-    if (isExpired) {
+    // Load batches and automatically select FIFO (First In First Out)
+    const batches = await loadBatches(product.id);
+    
+    if (batches.length === 0) {
       toast({
-        title: "Cannot add expired batch",
-        description: "This batch has expired and cannot be sold",
+        title: "No batches available",
+        description: "This product has no available batches",
         variant: "destructive",
       });
       return;
     }
 
-    const existing = cart.find((item) => item.id === selectedProduct.id && item.batch_id === batch.id);
+    // Filter out expired batches
+    const validBatches = batches.filter(batch => new Date(batch.expiry_date) >= new Date());
+    
+    if (validBatches.length === 0) {
+      toast({
+        title: "All batches expired",
+        description: "All available batches for this product have expired",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Automatically select the first valid batch (earliest expiry - FIFO)
+    const selectedBatch = validBatches[0];
+    
+    // Check if this batch is already in cart
+    const existing = cart.find((item) => item.id === product.id && item.batch_id === selectedBatch.id);
     
     if (existing) {
-      if (existing.quantity >= batch.remaining_quantity) {
+      // Check stock availability
+      if (existing.quantity >= selectedBatch.remaining_quantity) {
         toast({
           title: "Insufficient stock",
-          description: `Only ${batch.remaining_quantity} units available in this batch`,
+          description: `Only ${selectedBatch.remaining_quantity} units available in batch ${selectedBatch.batch_number}`,
           variant: "destructive",
         });
         return;
       }
       
+      // Increment existing batch quantity
       setCart(
         cart.map((item) =>
-          item.id === selectedProduct.id && item.batch_id === batch.id
+          item.id === product.id && item.batch_id === selectedBatch.id
             ? {
                 ...item,
                 quantity: item.quantity + 1,
@@ -132,25 +142,26 @@ const POS = () => {
         )
       );
     } else {
+      // Add new batch to cart
       setCart([
         ...cart,
         {
-          ...selectedProduct,
+          ...product,
           quantity: 1,
-          itemTotal: selectedProduct.selling_price,
-          itemTax: (selectedProduct.selling_price * selectedProduct.tax_rate) / 100,
-          batch_id: batch.id,
-          batch_number: batch.batch_number,
-          expiry_date: batch.expiry_date,
+          itemTotal: product.selling_price,
+          itemTax: (product.selling_price * product.tax_rate) / 100,
+          batch_id: selectedBatch.id,
+          batch_number: selectedBatch.batch_number,
+          expiry_date: selectedBatch.expiry_date,
         },
       ]);
     }
 
-    setBatchDialog(false);
-    setSelectedProduct(null);
+    // Show which batch was auto-selected
+    const daysUntilExpiry = Math.ceil((new Date(selectedBatch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
     toast({
-      title: "Added to cart",
-      description: `${selectedProduct.name} - Batch ${batch.batch_number}`,
+      title: "Added to cart (Auto FIFO)",
+      description: `${product.name} - Batch ${selectedBatch.batch_number} (Expires in ${daysUntilExpiry} days)`,
     });
   };
 
@@ -158,12 +169,23 @@ const POS = () => {
     setCart(cart.filter((item) => !(item.id === productId && (!batchId || item.batch_id === batchId))));
   };
 
-  const updateQuantity = (productId: string, quantity: number, batchId?: string) => {
+  const updateQuantity = async (productId: string, quantity: number, batchId?: string) => {
     const cartItem = cart.find((item) => item.id === productId && (!batchId || item.batch_id === batchId));
     if (!cartItem) return;
 
-    const batch = availableBatches.find((b) => b.id === cartItem.batch_id);
-    const maxQuantity = batch?.remaining_quantity || cartItem.stock_quantity;
+    // Fetch current batch data to get remaining quantity
+    let maxQuantity = cartItem.stock_quantity;
+    if (cartItem.batch_id) {
+      const { data: batchData } = await supabase
+        .from("product_batches")
+        .select("remaining_quantity")
+        .eq("id", cartItem.batch_id)
+        .single();
+      
+      if (batchData) {
+        maxQuantity = batchData.remaining_quantity;
+      }
+    }
 
     if (quantity > maxQuantity) {
       toast({
@@ -493,81 +515,6 @@ const POS = () => {
         </div>
       </div>
 
-      {/* Batch Selection Dialog */}
-      <Dialog open={batchDialog} onOpenChange={setBatchDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Select Batch - {selectedProduct?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {availableBatches.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <p>No batches available for this product</p>
-              </div>
-            ) : (
-              availableBatches.map((batch) => {
-                const isExpired = new Date(batch.expiry_date) < new Date();
-                const isExpiringSoon = !isExpired && new Date(batch.expiry_date) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-                
-                return (
-                  <Card
-                    key={batch.id}
-                    className={`cursor-pointer transition-all hover:shadow-md ${
-                      isExpired ? "opacity-50 cursor-not-allowed" : ""
-                    }`}
-                    onClick={() => !isExpired && addBatchToCart(batch)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-semibold">Batch: {batch.batch_number}</h4>
-                            {isExpired && (
-                              <span className="text-xs px-2 py-1 rounded bg-destructive/20 text-destructive">
-                                Expired
-                              </span>
-                            )}
-                            {isExpiringSoon && (
-                              <span className="text-xs px-2 py-1 rounded bg-yellow-500/20 text-yellow-700 dark:text-yellow-500">
-                                Expiring Soon
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-muted-foreground">
-                            <div>
-                              <span className="font-medium">Expiry:</span>{" "}
-                              {new Date(batch.expiry_date).toLocaleDateString()}
-                            </div>
-                            <div>
-                              <span className="font-medium">Stock:</span> {batch.remaining_quantity}
-                            </div>
-                            <div>
-                              <span className="font-medium">Mfg Date:</span>{" "}
-                              {new Date(batch.manufacturing_date).toLocaleDateString()}
-                            </div>
-                          </div>
-                        </div>
-                        <Button
-                          variant={isExpired ? "outline" : "default"}
-                          size="sm"
-                          disabled={isExpired}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            addBatchToCart(batch);
-                          }}
-                        >
-                          <Plus className="h-4 w-4 mr-1" />
-                          Add
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Receipt Dialog */}
       <Dialog open={receiptDialog} onOpenChange={setReceiptDialog}>
