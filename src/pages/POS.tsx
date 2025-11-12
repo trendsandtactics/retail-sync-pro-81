@@ -8,8 +8,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Trash2, ShoppingCart, Printer } from "lucide-react";
+import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
 
 interface Product {
@@ -130,6 +132,8 @@ const POS = () => {
   };
 
   const addBatchToCart = (product: Product, selectedBatch: Batch) => {
+    const daysUntilExpiry = Math.ceil((new Date(selectedBatch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    
     // Check if this batch is already in cart
     const existing = cart.find((item) => item.id === product.id && item.batch_id === selectedBatch.id);
     
@@ -173,12 +177,20 @@ const POS = () => {
       ]);
     }
 
-    // Show which batch was selected
-    const daysUntilExpiry = Math.ceil((new Date(selectedBatch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-    toast({
-      title: isFifoMode ? "Added to cart (Auto FIFO)" : "Added to cart",
-      description: `${product.name} - Batch ${selectedBatch.batch_number} (Expires in ${daysUntilExpiry} days)`,
-    });
+    // Show warning if batch expires within 30 days
+    if (daysUntilExpiry <= 30) {
+      toast({
+        title: "⚠️ Expiry Warning",
+        description: `${product.name} - Batch ${selectedBatch.batch_number} expires in ${daysUntilExpiry} days!`,
+        variant: "destructive",
+      });
+    } else {
+      // Show which batch was selected
+      toast({
+        title: isFifoMode ? "Added to cart (Auto FIFO)" : "Added to cart",
+        description: `${product.name} - Batch ${selectedBatch.batch_number} (Expires in ${daysUntilExpiry} days)`,
+      });
+    }
   };
 
   const removeFromCart = (productId: string, batchId?: string) => {
@@ -549,19 +561,36 @@ const POS = () => {
 
       {/* Batch Selection Dialog */}
       <Dialog open={batchDialog} onOpenChange={setBatchDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Select Batch for {selectedProduct?.name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
+            {availableBatches.some(batch => {
+              const daysUntilExpiry = Math.ceil(
+                (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+              );
+              return daysUntilExpiry <= 30;
+            }) && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  Some batches expire within 30 days. Please review carefully.
+                </AlertDescription>
+              </Alert>
+            )}
             {availableBatches.map((batch) => {
               const daysUntilExpiry = Math.ceil(
                 (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
               );
+              const isExpiringSoon = daysUntilExpiry <= 30;
+              
               return (
                 <Card
                   key={batch.id}
-                  className="cursor-pointer transition-all hover:shadow-md"
+                  className={`cursor-pointer transition-all hover:shadow-md ${
+                    isExpiringSoon ? 'border-destructive border-2' : ''
+                  }`}
                   onClick={() => {
                     if (selectedProduct) {
                       addBatchToCart(selectedProduct, batch);
@@ -571,9 +600,17 @@ const POS = () => {
                   }}
                 >
                   <CardContent className="p-4">
-                    <div className="flex justify-between items-start">
+                    <div className="flex justify-between items-start mb-2">
                       <div>
-                        <p className="font-semibold">Batch: {batch.batch_number}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold">Batch: {batch.batch_number}</p>
+                          {isExpiringSoon && (
+                            <Badge variant="destructive" className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              Expiring Soon
+                            </Badge>
+                          )}
+                        </div>
                         <p className="text-sm text-muted-foreground">
                           Stock: {batch.remaining_quantity} units
                         </p>
@@ -585,11 +622,21 @@ const POS = () => {
                         <p className="text-sm font-medium">
                           Expires: {new Date(batch.expiry_date).toLocaleDateString()}
                         </p>
-                        <p className={`text-xs ${daysUntilExpiry < 30 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        <p className={`text-xs font-semibold ${
+                          isExpiringSoon ? 'text-destructive' : 'text-muted-foreground'
+                        }`}>
                           {daysUntilExpiry} days left
                         </p>
                       </div>
                     </div>
+                    {isExpiringSoon && (
+                      <div className="mt-2 pt-2 border-t border-destructive/20">
+                        <p className="text-xs text-destructive flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          This batch expires in less than 30 days
+                        </p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
