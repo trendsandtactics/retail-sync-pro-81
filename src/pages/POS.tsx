@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle } from "lucide-react";
+import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle, Keyboard } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
 
 interface Product {
@@ -55,12 +55,90 @@ const POS = () => {
   const [batchDialog, setBatchDialog] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
 
   useEffect(() => {
     loadProducts();
   }, []);
+
+  const filteredProducts = products.filter(
+    (product) =>
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+        return;
+      }
+
+      // Ignore if dialog is open
+      if (batchDialog || receiptDialog) {
+        return;
+      }
+
+      // Enter - Complete sale
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (cart.length > 0) {
+          completeSale();
+        }
+        return;
+      }
+
+      // Escape - Clear cart
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (cart.length > 0) {
+          setCart([]);
+          toast({
+            title: "Cart cleared",
+            description: "All items removed from cart",
+          });
+        }
+        return;
+      }
+
+      // F1-F12 - Quick product access
+      if (e.key.startsWith('F') && e.key.length === 2) {
+        e.preventDefault();
+        const fNumber = parseInt(e.key.substring(1));
+        if (fNumber >= 1 && fNumber <= 12) {
+          const productIndex = fNumber - 1;
+          if (filteredProducts[productIndex]) {
+            addToCart(filteredProducts[productIndex]);
+          }
+        }
+        return;
+      }
+
+      // / - Focus search
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      // ? - Show shortcuts
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart, filteredProducts, batchDialog, receiptDialog]);
+
 
   const loadProducts = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -379,13 +457,6 @@ const POS = () => {
     });
   };
 
-  const filteredProducts = products.filter(
-    (product) =>
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   const { subtotal, tax, total } = calculateTotals();
 
   return (
@@ -393,11 +464,22 @@ const POS = () => {
       {/* Left Panel - Product Search */}
       <div className="flex-1 border-r p-6">
         <div className="mb-6">
-          <h2 className="text-2xl font-bold mb-4">Products</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold">Products</h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowShortcuts(true)}
+            >
+              <Keyboard className="h-4 w-4 mr-2" />
+              Shortcuts
+            </Button>
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search by name, SKU, or barcode..."
+              ref={searchInputRef}
+              placeholder="Search by name, SKU, or barcode... (Press / to focus)"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
@@ -406,7 +488,7 @@ const POS = () => {
         </div>
 
         <div className="grid gap-3 overflow-y-auto" style={{ maxHeight: "calc(100vh - 240px)" }}>
-          {filteredProducts.map((product) => (
+          {filteredProducts.slice(0, 12).map((product, index) => (
             <Card
               key={product.id}
               className="cursor-pointer transition-all hover:shadow-md"
@@ -414,8 +496,13 @@ const POS = () => {
             >
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold">{product.name}</h3>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">{product.name}</h3>
+                      <Badge variant="outline" className="text-xs">
+                        F{index + 1}
+                      </Badge>
+                    </div>
                     <p className="text-sm text-muted-foreground">{product.sku}</p>
                     <p className="text-xs text-muted-foreground">Stock: {product.stock_quantity}</p>
                   </div>
@@ -427,6 +514,11 @@ const POS = () => {
               </CardContent>
             </Card>
           ))}
+          {filteredProducts.length > 12 && (
+            <p className="text-sm text-muted-foreground text-center py-2">
+              +{filteredProducts.length - 12} more products (use search to filter)
+            </p>
+          )}
         </div>
       </div>
 
@@ -721,6 +813,53 @@ const POS = () => {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Keyboard Shortcuts Dialog */}
+      <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-5 w-5" />
+              Keyboard Shortcuts
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <h4 className="font-semibold text-sm">Quick Actions</h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Complete Sale</span>
+                  <Badge variant="secondary">Enter</Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Clear Cart</span>
+                  <Badge variant="secondary">Esc</Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Focus Search</span>
+                  <Badge variant="secondary">/</Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Show Shortcuts</span>
+                  <Badge variant="secondary">?</Badge>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-semibold text-sm">Quick Product Access</h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Add Product 1-12</span>
+                  <Badge variant="secondary">F1-F12</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Function keys F1 through F12 add the first 12 visible products to cart
+                </p>
+              </div>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
