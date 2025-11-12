@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { Search, Plus, Trash2, ShoppingCart, Printer } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
@@ -48,6 +49,10 @@ const POS = () => {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [receiptDialog, setReceiptDialog] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [isFifoMode, setIsFifoMode] = useState(true);
+  const [batchDialog, setBatchDialog] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
 
@@ -87,7 +92,7 @@ const POS = () => {
   };
 
   const addToCart = async (product: Product) => {
-    // Load batches and automatically select FIFO (First In First Out)
+    // Load batches
     const batches = await loadBatches(product.id);
     
     if (batches.length === 0) {
@@ -111,9 +116,20 @@ const POS = () => {
       return;
     }
 
-    // Automatically select the first valid batch (earliest expiry - FIFO)
+    // Manual mode - show batch selection dialog
+    if (!isFifoMode) {
+      setSelectedProduct(product);
+      setAvailableBatches(validBatches);
+      setBatchDialog(true);
+      return;
+    }
+
+    // Auto FIFO mode - automatically select the first valid batch (earliest expiry)
     const selectedBatch = validBatches[0];
-    
+    addBatchToCart(product, selectedBatch);
+  };
+
+  const addBatchToCart = (product: Product, selectedBatch: Batch) => {
     // Check if this batch is already in cart
     const existing = cart.find((item) => item.id === product.id && item.batch_id === selectedBatch.id);
     
@@ -157,10 +173,10 @@ const POS = () => {
       ]);
     }
 
-    // Show which batch was auto-selected
+    // Show which batch was selected
     const daysUntilExpiry = Math.ceil((new Date(selectedBatch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
     toast({
-      title: "Added to cart (Auto FIFO)",
+      title: isFifoMode ? "Added to cart (Auto FIFO)" : "Added to cart",
       description: `${product.name} - Batch ${selectedBatch.batch_number} (Expires in ${daysUntilExpiry} days)`,
     });
   };
@@ -404,11 +420,26 @@ const POS = () => {
 
       {/* Right Panel - Cart */}
       <div className="w-[450px] flex flex-col bg-card">
-        <div className="border-b p-6">
+        <div className="border-b p-6 space-y-4">
           <h2 className="text-2xl font-bold flex items-center">
             <ShoppingCart className="mr-2 h-6 w-6" />
             Cart
           </h2>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="fifo-mode" className="text-sm font-medium">
+              Auto FIFO Mode
+            </Label>
+            <Switch
+              id="fifo-mode"
+              checked={isFifoMode}
+              onCheckedChange={setIsFifoMode}
+            />
+          </div>
+          {!isFifoMode && (
+            <p className="text-xs text-muted-foreground">
+              Manual batch selection enabled
+            </p>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -515,6 +546,57 @@ const POS = () => {
         </div>
       </div>
 
+
+      {/* Batch Selection Dialog */}
+      <Dialog open={batchDialog} onOpenChange={setBatchDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Batch for {selectedProduct?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {availableBatches.map((batch) => {
+              const daysUntilExpiry = Math.ceil(
+                (new Date(batch.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+              );
+              return (
+                <Card
+                  key={batch.id}
+                  className="cursor-pointer transition-all hover:shadow-md"
+                  onClick={() => {
+                    if (selectedProduct) {
+                      addBatchToCart(selectedProduct, batch);
+                      setBatchDialog(false);
+                      setSelectedProduct(null);
+                    }
+                  }}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold">Batch: {batch.batch_number}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Stock: {batch.remaining_quantity} units
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Mfg: {new Date(batch.manufacturing_date).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium">
+                          Expires: {new Date(batch.expiry_date).toLocaleDateString()}
+                        </p>
+                        <p className={`text-xs ${daysUntilExpiry < 30 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                          {daysUntilExpiry} days left
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Receipt Dialog */}
       <Dialog open={receiptDialog} onOpenChange={setReceiptDialog}>
