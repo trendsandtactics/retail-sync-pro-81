@@ -11,8 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle, Keyboard } from "lucide-react";
+import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle, Keyboard, Eye } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
+import { Receipt } from "@/components/Receipt";
 
 interface Product {
   id: string;
@@ -56,6 +57,7 @@ const POS = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const barcodeBufferRef = useRef<string>("");
   const barcodeTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -528,7 +530,7 @@ const POS = () => {
     }
 
     setLastInvoice({ ...saleData, items: cart });
-    setReceiptDialog(true);
+    setShowPrintPreview(true);
     
     // Clear cart and customer info
     setCart([]);
@@ -822,81 +824,20 @@ const POS = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Receipt Dialog */}
-      <Dialog open={receiptDialog} onOpenChange={setReceiptDialog}>
-        <DialogContent className="max-w-md">
+      {/* Print Preview Dialog */}
+      <Dialog open={showPrintPreview} onOpenChange={setShowPrintPreview}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center">
-              <Printer className="mr-2 h-5 w-5" />
-              Sale Completed
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              Print Preview - Invoice {lastInvoice?.invoice_number}
             </DialogTitle>
           </DialogHeader>
           {lastInvoice && (
-            <div className="space-y-4">
-              <div className="text-center border-b pb-4">
-                <h3 className="text-lg font-bold">RetailPro POS</h3>
-                <p className="text-sm text-muted-foreground">Tax Invoice</p>
-              </div>
-
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Invoice No:</span>
-                  <span className="font-semibold">{lastInvoice.invoice_number}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Date:</span>
-                  <span>{new Date(lastInvoice.created_at).toLocaleString()}</span>
-                </div>
-                {lastInvoice.customer_name && (
-                  <div className="flex justify-between">
-                    <span>Customer:</span>
-                    <span>{lastInvoice.customer_name}</span>
-                  </div>
-                )}
-              </div>
-
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lastInvoice.items.map((item: CartItem) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="text-sm">{item.name}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">₹{(item.itemTotal + item.itemTax).toFixed(2)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-
-              <div className="space-y-1 border-t pt-4">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal:</span>
-                  <span>₹{lastInvoice.subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>GST:</span>
-                  <span>₹{lastInvoice.tax_amount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between font-bold text-lg border-t pt-2">
-                  <span>Total:</span>
-                  <span>₹{lastInvoice.total_amount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="text-center text-sm text-muted-foreground border-t pt-4">
-                <p>Thank you for your business!</p>
-              </div>
-
-              <Button className="w-full" onClick={() => setReceiptDialog(false)}>
-                Close
-              </Button>
-            </div>
+            <Receipt 
+              invoice={lastInvoice} 
+              onPrint={() => setShowPrintPreview(false)}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -936,12 +877,17 @@ const POS = () => {
               <h4 className="font-semibold text-sm">Quick Product Access</h4>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Add Product 1-12</span>
-                  <Badge variant="secondary">F1-F12</Badge>
+                  <span className="text-muted-foreground">Add First 12 Products</span>
+                  <Badge variant="secondary">F1 - F12</Badge>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Function keys F1 through F12 add the first 12 visible products to cart
-                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-semibold text-sm">Barcode Scanner</h4>
+              <div className="space-y-1 text-sm">
+                <div className="text-muted-foreground">
+                  Simply scan product barcodes to automatically add items to cart
+                </div>
               </div>
             </div>
           </div>
