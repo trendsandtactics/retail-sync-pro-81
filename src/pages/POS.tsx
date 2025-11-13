@@ -57,8 +57,28 @@ const POS = () => {
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const barcodeBufferRef = useRef<string>("");
+  const barcodeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const successSoundRef = useRef<HTMLAudioElement | null>(null);
+  const errorSoundRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
   const { currentStore, tenantId } = useTenantStore();
+
+  // Initialize sound effects
+  useEffect(() => {
+    // Create success sound (beep)
+    const successAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBDGH0fPTgjMGHm7A7+OZUQ4PWqzn7aRZEwU+ltryxnIlBSl+zPLaizsIGGS56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy');
+    successSoundRef.current = successAudio;
+
+    // Create error sound (lower pitched beep)
+    const errorAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBDGH0fPTgjMGHm7A7+OZUQ4PWqzn7aRZEwU+ltryxnIlBSl+zPLaizsIGGS56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy0H4qBSh9y/LajDsIF2S56+idUQ8MUKXi8LdkHAY5kdXy');
+    errorSoundRef.current = errorAudio;
+
+    return () => {
+      successSoundRef.current = null;
+      errorSoundRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     loadProducts();
@@ -70,6 +90,71 @@ const POS = () => {
       product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Barcode scanner listener
+  useEffect(() => {
+    const handleBarcodeScan = (e: KeyboardEvent) => {
+      // Clear timer if exists
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current);
+      }
+
+      // If Enter key is pressed, process the barcode
+      if (e.key === 'Enter' && barcodeBufferRef.current) {
+        e.preventDefault();
+        const barcode = barcodeBufferRef.current;
+        barcodeBufferRef.current = "";
+        
+        // Find product by barcode
+        const product = products.find(p => p.barcode === barcode);
+        
+        if (product) {
+          // Play success sound
+          successSoundRef.current?.play().catch(() => {});
+          
+          // Add to cart with visual feedback
+          addToCart(product);
+          
+          // Visual confirmation
+          toast({
+            title: "✓ Scanned Successfully",
+            description: `${product.name} added to cart`,
+            duration: 2000,
+          });
+        } else {
+          // Play error sound
+          errorSoundRef.current?.play().catch(() => {});
+          
+          // Show error
+          toast({
+            title: "❌ Product Not Found",
+            description: `No product found with barcode: ${barcode}`,
+            variant: "destructive",
+            duration: 3000,
+          });
+        }
+        return;
+      }
+
+      // Accumulate characters (barcode scanners type very fast)
+      if (e.key.length === 1) {
+        barcodeBufferRef.current += e.key;
+        
+        // Reset buffer after 100ms of inactivity (typical for scanner input)
+        barcodeTimerRef.current = setTimeout(() => {
+          barcodeBufferRef.current = "";
+        }, 100);
+      }
+    };
+
+    window.addEventListener('keydown', handleBarcodeScan);
+    return () => {
+      window.removeEventListener('keydown', handleBarcodeScan);
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current);
+      }
+    };
+  }, [products, cart]);
 
   // Keyboard shortcuts
   useEffect(() => {
