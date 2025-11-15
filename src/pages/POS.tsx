@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle, Keyboard, Eye } from "lucide-react";
+import { Search, Plus, Trash2, ShoppingCart, Printer, AlertTriangle, Keyboard, Eye, Percent, DollarSign } from "lucide-react";
 import { useTenantStore } from "@/hooks/useTenantStore";
 import { Receipt } from "@/components/Receipt";
 
@@ -33,6 +33,9 @@ interface CartItem extends Product {
   batch_id?: string;
   batch_number?: string;
   expiry_date?: string;
+  discount_type?: 'percentage' | 'fixed';
+  discount_value?: number;
+  discount_amount?: number;
 }
 
 interface Batch {
@@ -58,6 +61,12 @@ const POS = () => {
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showDiscountDialog, setShowDiscountDialog] = useState(false);
+  const [discountTarget, setDiscountTarget] = useState<{ type: 'item', item: CartItem } | { type: 'total' } | null>(null);
+  const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage');
+  const [discountValue, setDiscountValue] = useState<number>(0);
+  const [totalDiscountType, setTotalDiscountType] = useState<'percentage' | 'fixed'>('percentage');
+  const [totalDiscountValue, setTotalDiscountValue] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const barcodeBufferRef = useRef<string>("");
   const barcodeTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -314,14 +323,23 @@ const POS = () => {
       }
       
       // Increment existing batch quantity
+      const updatedItem = cart.find(item => item.id === product.id && item.batch_id === selectedBatch.id)!;
+      const newQuantity = updatedItem.quantity + 1;
+      const subtotalAmount = newQuantity * updatedItem.selling_price;
+      const itemDiscount = updatedItem.discount_type === 'percentage' 
+        ? (subtotalAmount * (updatedItem.discount_value || 0)) / 100
+        : (updatedItem.discount_value || 0);
+      const discountedAmount = subtotalAmount - itemDiscount;
+      
       setCart(
         cart.map((item) =>
           item.id === product.id && item.batch_id === selectedBatch.id
             ? {
                 ...item,
-                quantity: item.quantity + 1,
-                itemTotal: (item.quantity + 1) * item.selling_price,
-                itemTax: ((item.quantity + 1) * item.selling_price * item.tax_rate) / 100,
+                quantity: newQuantity,
+                itemTotal: subtotalAmount,
+                discount_amount: itemDiscount,
+                itemTax: (discountedAmount * item.tax_rate) / 100,
               }
             : item
         )
@@ -395,24 +413,40 @@ const POS = () => {
     }
 
     setCart(
-      cart.map((item) =>
-        item.id === productId && (!batchId || item.batch_id === batchId)
-          ? {
-              ...item,
-              quantity,
-              itemTotal: quantity * item.selling_price,
-              itemTax: (quantity * item.selling_price * item.tax_rate) / 100,
-            }
-          : item
-      )
+      cart.map((item) => {
+        if (item.id === productId && (!batchId || item.batch_id === batchId)) {
+          const subtotalAmount = quantity * item.selling_price;
+          const itemDiscount = item.discount_type === 'percentage' 
+            ? (subtotalAmount * (item.discount_value || 0)) / 100
+            : (item.discount_value || 0);
+          const discountedAmount = subtotalAmount - itemDiscount;
+          
+          return {
+            ...item,
+            quantity,
+            itemTotal: subtotalAmount,
+            discount_amount: itemDiscount,
+            itemTax: (discountedAmount * item.tax_rate) / 100,
+          };
+        }
+        return item;
+      })
     );
   };
 
   const calculateTotals = () => {
     const subtotal = cart.reduce((sum, item) => sum + item.itemTotal, 0);
+    const itemDiscounts = cart.reduce((sum, item) => sum + (item.discount_amount || 0), 0);
+    const discountedSubtotal = subtotal - itemDiscounts;
     const tax = cart.reduce((sum, item) => sum + item.itemTax, 0);
-    const total = subtotal + tax;
-    return { subtotal, tax, total };
+    
+    // Apply total discount after item discounts
+    const totalDiscount = totalDiscountType === 'percentage' 
+      ? ((discountedSubtotal + tax) * totalDiscountValue) / 100
+      : totalDiscountValue;
+    
+    const total = discountedSubtotal + tax - totalDiscount;
+    return { subtotal, tax, total, itemDiscounts, totalDiscount };
   };
 
   const completeSale = async () => {
@@ -435,7 +469,7 @@ const POS = () => {
       return;
     }
 
-    const { subtotal, tax, total } = calculateTotals();
+    const { subtotal, tax, total, itemDiscounts, totalDiscount } = calculateTotals();
     const invoiceNumber = `INV-${Date.now()}`;
 
     // Create sale
@@ -451,6 +485,7 @@ const POS = () => {
           customer_phone: customerPhone || null,
           subtotal,
           tax_amount: tax,
+          discount_amount: itemDiscounts + totalDiscount,
           total_amount: total,
           payment_method: paymentMethod,
           payment_status: "completed",
@@ -479,7 +514,8 @@ const POS = () => {
       unit_price: item.selling_price,
       tax_rate: item.tax_rate,
       tax_amount: item.itemTax,
-      total_amount: item.itemTotal + item.itemTax,
+      discount_amount: item.discount_amount || 0,
+      total_amount: item.itemTotal - (item.discount_amount || 0) + item.itemTax,
       batch_id: item.batch_id,
     }));
 
@@ -536,6 +572,9 @@ const POS = () => {
     setCart([]);
     setCustomerName("");
     setCustomerPhone("");
+    setPaymentMethod("cash");
+    setTotalDiscountType('percentage');
+    setTotalDiscountValue(0);
     loadProducts();
 
     toast({
@@ -544,7 +583,64 @@ const POS = () => {
     });
   };
 
-  const { subtotal, tax, total } = calculateTotals();
+  const applyDiscount = () => {
+    if (!discountTarget) return;
+
+    if (discountTarget.type === 'item') {
+      const item = discountTarget.item;
+      setCart(cart.map(cartItem => {
+        if (cartItem.id === item.id && cartItem.batch_id === item.batch_id) {
+          const subtotalAmount = cartItem.quantity * cartItem.selling_price;
+          const itemDiscount = discountType === 'percentage' 
+            ? (subtotalAmount * discountValue) / 100
+            : discountValue;
+          const discountedAmount = subtotalAmount - itemDiscount;
+          
+          return {
+            ...cartItem,
+            discount_type: discountType,
+            discount_value: discountValue,
+            discount_amount: itemDiscount,
+            itemTax: (discountedAmount * cartItem.tax_rate) / 100,
+          };
+        }
+        return cartItem;
+      }));
+
+      toast({
+        title: "Item discount applied",
+        description: `${discountType === 'percentage' ? `${discountValue}%` : `₹${discountValue}`} discount applied to ${item.name}`,
+      });
+    } else {
+      setTotalDiscountType(discountType);
+      setTotalDiscountValue(discountValue);
+
+      toast({
+        title: "Total discount applied",
+        description: `${discountType === 'percentage' ? `${discountValue}%` : `₹${discountValue}`} discount applied to total`,
+      });
+    }
+
+    setShowDiscountDialog(false);
+    setDiscountValue(0);
+    setDiscountType('percentage');
+    setDiscountTarget(null);
+  };
+
+  const openDiscountDialog = (item?: CartItem) => {
+    if (item) {
+      setDiscountTarget({ type: 'item', item });
+      setDiscountType(item.discount_type || 'percentage');
+      setDiscountValue(item.discount_value || 0);
+    } else {
+      setDiscountTarget({ type: 'total' });
+      setDiscountType(totalDiscountType);
+      setDiscountValue(totalDiscountValue);
+    }
+    setShowDiscountDialog(true);
+  };
+
+  const { subtotal, tax, total, itemDiscounts, totalDiscount } = calculateTotals();
 
   return (
     <div className="flex h-full">
@@ -667,9 +763,33 @@ const POS = () => {
                         onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0, item.batch_id)}
                         className="w-20"
                       />
-                      <span className="text-sm font-semibold ml-auto">
-                        ₹{(item.itemTotal + item.itemTax).toFixed(2)}
-                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openDiscountDialog(item)}
+                        className="ml-2"
+                      >
+                        <Percent className="h-3 w-3" />
+                      </Button>
+                      <div className="flex-1 text-right">
+                        {item.discount_amount ? (
+                          <div>
+                            <p className="text-xs text-muted-foreground line-through">
+                              ₹{(item.itemTotal + item.itemTax).toFixed(2)}
+                            </p>
+                            <p className="text-sm font-semibold text-primary">
+                              ₹{(item.itemTotal - (item.discount_amount || 0) + item.itemTax).toFixed(2)}
+                            </p>
+                            <p className="text-xs text-green-600">
+                              {item.discount_type === 'percentage' ? `${item.discount_value}% off` : `₹${item.discount_value} off`}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-sm font-semibold">
+                            ₹{(item.itemTotal + item.itemTax).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -716,9 +836,31 @@ const POS = () => {
               <span>Subtotal:</span>
               <span>₹{subtotal.toFixed(2)}</span>
             </div>
+            {itemDiscounts > 0 && (
+              <div className="flex justify-between text-sm text-green-600">
+                <span>Item Discounts:</span>
+                <span>-₹{itemDiscounts.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span>GST:</span>
               <span>₹{tax.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span>Total Discount:</span>
+              <div className="flex items-center gap-2">
+                <span className={totalDiscount > 0 ? "text-green-600" : ""}>
+                  {totalDiscount > 0 ? `-₹${totalDiscount.toFixed(2)}` : '₹0.00'}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openDiscountDialog()}
+                  className="h-6 px-2"
+                >
+                  <Percent className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
             <div className="flex justify-between text-lg font-bold pt-2 border-t">
               <span>Total:</span>
@@ -889,6 +1031,80 @@ const POS = () => {
                   Simply scan product barcodes to automatically add items to cart
                 </div>
               </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discount Dialog */}
+      <Dialog open={showDiscountDialog} onOpenChange={setShowDiscountDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {discountTarget?.type === 'item' 
+                ? `Apply Discount to ${(discountTarget as { type: 'item', item: CartItem }).item.name}`
+                : 'Apply Total Discount'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Discount Type</Label>
+              <Select value={discountType} onValueChange={(value: 'percentage' | 'fixed') => setDiscountType(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">
+                    <div className="flex items-center gap-2">
+                      <Percent className="h-4 w-4" />
+                      <span>Percentage</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="fixed">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4" />
+                      <span>Fixed Amount</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Discount Value</Label>
+              <Input
+                type="number"
+                min="0"
+                max={discountType === 'percentage' ? 100 : undefined}
+                value={discountValue}
+                onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
+                placeholder={discountType === 'percentage' ? 'Enter percentage (0-100)' : 'Enter amount'}
+              />
+              {discountType === 'percentage' && discountValue > 100 && (
+                <p className="text-xs text-destructive">Percentage cannot exceed 100%</p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDiscountDialog(false);
+                  setDiscountValue(0);
+                  setDiscountType('percentage');
+                  setDiscountTarget(null);
+                }}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={applyDiscount}
+                disabled={discountValue <= 0 || (discountType === 'percentage' && discountValue > 100)}
+                className="flex-1"
+              >
+                Apply Discount
+              </Button>
             </div>
           </div>
         </DialogContent>
